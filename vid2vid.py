@@ -165,8 +165,8 @@ class Script(scripts.Script):
             save_video = gr.Checkbox(label='Save results as video', value=True)
             output_crf = gr.Slider(
                 label="Video CRF (quality, less is better, x264 param)",
-                minimum=1,
-                maximum=40,
+                minimum=16,
+                maximum=32,
                 step=1,
                 value=24,
             )
@@ -223,6 +223,7 @@ class Script(scripts.Script):
         Path.mkdir(output_path, parents = True, exist_ok = True)
         print("Output: ", output_path)
 
+        # video statistics
         video_fps = Video.fps(input_path)
         video_duration = Video.duration(input_path)
 
