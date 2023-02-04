@@ -46,30 +46,89 @@ def time_string_to_seconds(time_str : str) -> float:
     return 3600*h + 60*m + s + ms/1000.0
 
 # given a string of time or frame, return time in seconds
-def parse_to_seconds(s : str, fps : float) -> float:
+def parse_to_seconds(s : str, fps : float, duration : float) -> float:
+    if fps <= 0:
+        raise RuntimeError(f"FPS must be > 0: {fps}")
+    if duration <= 0:
+        raise RuntimeError(f"Duration must be > 0: {duration}")
+
     s = s.strip()
-    if ':' in s:
-        return time_string_to_seconds(s)
+    if s == "":
+        return 0.
+    elif s.endswith('%'):
+        percentage = float(s.strip('%'))
+        return (percentage / 100.) * duration
+    elif ':' in s:
+        return min(duration, time_string_to_seconds(s))
     elif '.' in s:
-        return float(s)
+        return min(duration, float(s))
     else:
-        return float(s) / fps
+        return min(duration, float(s) / fps)
 
 
-def parse_schedule(s : str, fps : float) -> list:
+def parse_schedule(s : str, fps : float, duration : float) -> list:
     seeds = []
     if s != "":
         seed_strs = [x.strip() for x in s.split(",")]
         for seed_str in seed_strs:
             time_seed_split = seed_str.rsplit(":", maxsplit=1)
-            t = parse_to_seconds(time_seed_split[0], fps)
+            t = parse_to_seconds(time_seed_split[0], fps, duration)
             seed = int(time_seed_split[1].strip(" ()"))
             if seed < 0:
-                seed = random.randint(0, MAX_SEED)
+                seed = random_seed()
             seeds.append((t, seed))
     if len(seeds) == 0:
-        seeds.append((0,random.randint(0, MAX_SEED)))
+        seeds.append((0,random_seed()))
     return sorted(seeds)
+
+
+def time_to_frame(time : float, fps : float) -> int:
+    # compensate for floats being weird
+    # at 30 fps, first frame from 0 to 32ms, second frame starts at 33ms
+    # e.g. 333ms = 0.333 * 30 fps = 9.99, we want to return frame 10
+    return int( (time * fps) + 0.01 )
+
+
+def random_seed() -> int:
+    return random.randint(0, MAX_SEED)
+
+
+def seed_travel_planning(seeds : list, frame_count : int, fps : float, starting_seed : int) -> list:
+    seeds_per_frame = []
+    current_frame = frame = 0
+    seed = next_seed = starting_seed
+    next_frame = frame_count
+
+    # NOTE: frames count from 1, but list is 0 indexed
+    while len(seeds_per_frame) < frame_count:
+        current_frame = len(seeds_per_frame) + 1
+        next_frame = frame_count # the end
+        if len(seeds) > 0:
+            # set next_frame and next_seed here to transition from starting seed
+            time, next_seed = seeds[0] 
+            next_frame = frame = time_to_frame(time, fps)
+            if current_frame >= frame:
+                _, seed = seeds.pop(0)
+                if len(seeds) > 0:
+                    next_time, next_seed = seeds[0]
+                    next_frame = time_to_frame(next_time, fps)
+                else:
+                    next_seed = -1
+                    next_frame = frame_count + 1
+        steps = max(1, next_frame - current_frame)
+        for i in range(current_frame, next_frame):
+            if next_seed == -1 or next_seed == seed:
+                seeds_per_frame.append((seed, 0, 0))
+            else:
+                strength = float(i-current_frame)/float(steps)
+                if strength == 0.0:
+                    seeds_per_frame.append((seed, 0, 0))
+                elif strength == 1.0: # shouldn't happen
+                    seeds_per_frame.append((next_seed, 0, 0))
+                else:
+                    seeds_per_frame.append((seed, next_seed, strength))
+    #print(seeds_per_frame)
+    return seeds_per_frame
 
 
 class Script(scripts.Script):
@@ -91,13 +150,13 @@ class Script(scripts.Script):
                 step=1,
                 value=15,
             )
+            start = gr.Textbox(label="Start time", value="00:00:00", lines=1, description="Time (hh:mm:ss.ms) or seconds (float) or frame (integer), defaults to start")
+            end = gr.Textbox(label="End time", value="00:00:00", lines=1, description="Time (hh:mm:ss.ms) or seconds (float) or frame (integer), defaults to end")
+
+        with gr.Row():
             save_dir = gr.Textbox(label="Output file path", lines=1, value="outputs/img2img-video/vid2vid/")
             #video_frames_dir = gr.Textbox(label="Output file path", lines=1, value="outputs/img2img-video/vid2vid/temp_frames")
             keep = gr.Checkbox(label='Keep generated pngs?', value=False)
-
-        with gr.Row():
-            start = gr.Textbox(label="Start time", value="00:00:00", lines=1, description="Time (hh:mm:ss.ms) or seconds (float) or frame (integer), defaults to start")
-            end = gr.Textbox(label="End time", value="00:00:00", lines=1, description="Time (hh:mm:ss.ms) or seconds (float) or frame (integer), defaults to end")
 
         with gr.Row():
             seed_schedule = gr.Textbox(label="Seed schedule", lines=1, description="Relative to start. Format: <frame or time>: <seed>, ... where frame is an integer or a time in mm:ss and seed in an integer or -1 for random")
@@ -153,8 +212,6 @@ class Script(scripts.Script):
         initial_seed = p.seed
         initial_info = None
 
-
-
         # set up paths
         input_path = Path(input_path.strip())
         if not Path.exists(input_path):
@@ -167,9 +224,10 @@ class Script(scripts.Script):
         print("Output: ", output_path)
 
         video_fps = Video.fps(input_path)
+        video_duration = Video.duration(input_path)
 
-        start_time = parse_to_seconds(start, video_fps)
-        end_time = parse_to_seconds(end, video_fps)
+        start_time = parse_to_seconds(start, video_fps, video_duration)
+        end_time = parse_to_seconds(end, video_fps, video_duration) # will be 0 if unspecified
         output_crf = int(output_crf)
         output_fps = float(output_fps)
 
@@ -178,7 +236,7 @@ class Script(scripts.Script):
 
         # count extracted images
         frames = sorted(output_path.glob(f"{input_path.stem}*.png"))
-
+        
         p.do_not_save_grid = True
         p.do_not_save_samples = True
         p.subseed_strength = 0
@@ -189,19 +247,9 @@ class Script(scripts.Script):
         # seeds: a list of sorted time and seed pairs
         seeds = []
         if seed_schedule != "":
-            seeds = parse_schedule(seed_schedule, video_fps)
-            print(seeds)
-
-        # init images
-        # init_images = []
-        # for frame_path in frames:
-        #     if state.interrupted:
-        #         break
-        #     init_images.append(Image.open(frame_path))
-        # if len(init_images) == 0:
-        #     raise RuntimeError(f"No video frames extracted to: {str(output_path)}")
-        # else:
-        #     print(f"Found {len(init_images)} frames")
+            seed_schedule = parse_schedule(seed_schedule, video_fps, video_duration)
+            #print(seed_schedule)
+            seeds = seed_travel_planning(seed_schedule,len(frames), video_fps, initial_seed)
 
         state.job_count = len(frames)
 
@@ -216,15 +264,7 @@ class Script(scripts.Script):
                 break
             frame = i + 1
             state.job = f"Frame {frame}/{len(frames)}"
-
-            # check if new seed needed
-            # TODO: subseed travel
-            if len(seeds) > 0:
-                time, seed = seeds[0]
-                if frame >= time * video_fps:
-                    p.seed = seed
-                    seeds.pop(0)
-
+            p.seed, p.subseed, p.subseed_strength = seeds[i]
             p.init_images = [Image.open(frames[i])]
             proc = process_images(p)
             if initial_info is None:
@@ -247,18 +287,33 @@ class Script(scripts.Script):
 
 class Video:
 
+    def duration(video_path : str) -> float:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v","error",
+                "-select_streams","v:0",
+                "-of","default=noprint_wrappers=1:nokey=1",
+                "-show_entries", "stream=duration",
+                str(video_path),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        if result.returncode != 0:
+            print(result.stderr.decode('utf-8'))
+            raise RuntimeError(result.stderr.decode('utf-8'))
+        duration = float(result.stdout.decode('utf-8'))
+        return duration
+
     def fps(video_path : str) -> float:
         result = subprocess.run(
             [
                 "ffprobe",
-                "-v",
-                "error",
-                "-select_streams",
-                "v",
-                "-of",
-                "default=noprint_wrappers=1:nokey=1",
-                "-show_entries",
-                "stream=r_frame_rate",
+                "-v","error",
+                "-select_streams","v:0",
+                "-of","default=noprint_wrappers=1:nokey=1",
+                "-show_entries", "stream=r_frame_rate",
                 str(video_path),
             ],
             stdout=subprocess.PIPE,
