@@ -24,11 +24,10 @@ import modules.scripts as scripts
 import numpy as np
 from modules import processing
 from modules.images import sanitize_filename_part
-from modules.processing import Processed, process_images
+from modules.processing import Processed, process_images, get_fixed_seed
 from modules.shared import state
 from PIL import Image
 
-MAX_SEED = 2147483647
 DEFAULT_RESULT_PATH = "output"
 DEFAULT_FRAMES_PATH = "input"
 
@@ -88,21 +87,6 @@ def time_to_frame(time : float, fps : float) -> int:
     # at 30 fps, first frame from 0 to 32ms, second frame starts at 33ms
     # e.g. 333ms = 0.333 * 30 fps = 9.99, we want to return frame 10
     return int( (time * fps) + 0.01 )
-
-
-def random_seed() -> int:
-    return random.randint(0, MAX_SEED)
-
-
-def fix_seed(seed : Any) -> int:
-    if seed is None:
-        return random_seed()
-    
-    s = int(seed)
-    if s < 0:
-        return random_seed()
-
-    return s
 
 
 def seed_travel_planning(seeds : list, frame_count : int, fps : float, starting_seed : int) -> list:
@@ -170,6 +154,12 @@ def travel_planning(values : list, frame_count : int, fps : float, value_fn: Cal
     #print(values_per_frame)
     return values_per_frame
 
+
+def fix_seed(s : Any) -> int:
+    if s is None:
+        return get_fixed_seed(s)
+    
+    return get_fixed_seed(int(s))
 
 class Script(scripts.Script):
     def title(self):
