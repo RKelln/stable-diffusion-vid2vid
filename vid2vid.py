@@ -17,6 +17,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 import subprocess
+from typing import Any, Callable
 
 import gradio as gr
 import modules.scripts as scripts
@@ -28,6 +29,8 @@ from modules.shared import state
 from PIL import Image
 
 MAX_SEED = 2147483647
+DEFAULT_RESULT_PATH = "output"
+DEFAULT_FRAMES_PATH = "input"
 
 # parse a string time in the form of 00:00:00.000 to seconds
 def time_string_to_seconds(time_str : str) -> float:
@@ -56,30 +59,28 @@ def parse_to_seconds(s : str, fps : float, duration : float) -> float:
     if s == "":
         return 0.
     elif s.endswith('%'):
-        percentage = float(s.strip('%'))
+        percentage = max(0.0, min(100.0, float(s.strip('%'))))
         return (percentage / 100.) * duration
     elif ':' in s:
-        return min(duration, time_string_to_seconds(s))
+        return max(0.0, min(duration, time_string_to_seconds(s)))
     elif '.' in s:
-        return min(duration, float(s))
-    else:
-        return min(duration, float(s) / fps)
+        return max(0.0, min(duration, float(s)))
+    else: # integers treated as frames
+        return max(0.0, min(duration, float(s) / fps))
 
 
-def parse_schedule(s : str, fps : float, duration : float) -> list:
-    seeds = []
+def parse_schedule(s : str, fps : float, duration : float, default_value : Any) -> list:
+    values = []
     if s != "":
-        seed_strs = [x.strip() for x in s.split(",")]
-        for seed_str in seed_strs:
-            time_seed_split = seed_str.rsplit(":", maxsplit=1)
+        value_strs = [x.strip() for x in s.split(",")]
+        for v_str in value_strs:
+            time_seed_split = v_str.rsplit(":", maxsplit=1)
             t = parse_to_seconds(time_seed_split[0], fps, duration)
-            seed = int(time_seed_split[1].strip(" ()"))
-            if seed < 0:
-                seed = random_seed()
-            seeds.append((t, seed))
-    if len(seeds) == 0:
-        seeds.append((0,random_seed()))
-    return sorted(seeds)
+            seed = time_seed_split[1].strip(" ()")
+            values.append((t, seed))
+    if len(values) == 0:
+        values.append((0, default_value))
+    return sorted(values)
 
 
 def time_to_frame(time : float, fps : float) -> int:
@@ -93,42 +94,81 @@ def random_seed() -> int:
     return random.randint(0, MAX_SEED)
 
 
+def fix_seed(seed : Any) -> int:
+    if seed is None:
+        return random_seed()
+    
+    s = int(seed)
+    if s < 0:
+        return random_seed()
+
+    return s
+
+
 def seed_travel_planning(seeds : list, frame_count : int, fps : float, starting_seed : int) -> list:
-    seeds_per_frame = []
+
+    def seed_values(v, next_v, step, steps) -> tuple:
+        if next_v == None or next_v == v:
+            return (v, 0, 0)
+        else:
+            strength = float(step)/float(steps)
+            if strength == 0.0:
+                return (v, 0, 0)
+            elif strength == 1.0: # shouldn't happen
+                return (next_v, 0, 0)
+            else:
+                return (v, next_v, strength)
+
+    return travel_planning(seeds, frame_count, fps, seed_values, starting_seed)
+
+
+def basic_lerp(v, next_v, step, steps) -> float:
+        if next_v == None or next_v == v:
+            return v
+        else:
+            strength = float(step)/float(steps)
+            if strength == 0.0:
+                return v
+            elif strength == 1.0:
+                return next_v
+            else:
+                return v + (strength * (next_v - v))
+
+
+def denoise_travel_planning(noise_timings : list, frame_count : int, fps : float, starting_noise : float) -> list:
+
+    return travel_planning(noise_timings, frame_count, fps, basic_lerp, starting_noise)
+
+
+# value_fn(v, next_v, step, steps) -> tuple:
+def travel_planning(values : list, frame_count : int, fps : float, value_fn: Callable[[Any, Any, int, int], Any], starting_value : any) -> list:
+    values_per_frame = []
     current_frame = frame = 0
-    seed = next_seed = starting_seed
+    v = next_v = starting_value
     next_frame = frame_count
 
     # NOTE: frames count from 1, but list is 0 indexed
-    while len(seeds_per_frame) < frame_count:
-        current_frame = len(seeds_per_frame) + 1
+    while len(values_per_frame) < frame_count:
+        current_frame = len(values_per_frame) + 1
         next_frame = frame_count # the end
-        if len(seeds) > 0:
-            # set next_frame and next_seed here to transition from starting seed
-            time, next_seed = seeds[0] 
-            next_frame = frame = time_to_frame(time, fps)
+        if len(values) > 0:
+            # set next_frame and next_v here to transition from starting seed
+            time, next_v = values[0] 
+            next_frame = frame = min(frame_count, time_to_frame(time, fps))
             if current_frame >= frame:
-                _, seed = seeds.pop(0)
-                if len(seeds) > 0:
-                    next_time, next_seed = seeds[0]
-                    next_frame = time_to_frame(next_time, fps)
+                _, v = values.pop(0)
+                if len(values) > 0:
+                    next_time, next_v = values[0]
+                    next_frame = min(frame_count, time_to_frame(next_time, fps))
                 else:
-                    next_seed = -1
+                    next_v = None
                     next_frame = frame_count + 1
         steps = max(1, next_frame - current_frame)
         for i in range(current_frame, next_frame):
-            if next_seed == -1 or next_seed == seed:
-                seeds_per_frame.append((seed, 0, 0))
-            else:
-                strength = float(i-current_frame)/float(steps)
-                if strength == 0.0:
-                    seeds_per_frame.append((seed, 0, 0))
-                elif strength == 1.0: # shouldn't happen
-                    seeds_per_frame.append((next_seed, 0, 0))
-                else:
-                    seeds_per_frame.append((seed, next_seed, strength))
-    #print(seeds_per_frame)
-    return seeds_per_frame
+            values_per_frame.append( value_fn(v, next_v, i-current_frame, steps) )
+            
+    #print(values_per_frame)
+    return values_per_frame
 
 
 class Script(scripts.Script):
@@ -159,8 +199,10 @@ class Script(scripts.Script):
             keep = gr.Checkbox(label='Keep generated pngs?', value=False)
 
         with gr.Row():
-            seed_schedule = gr.Textbox(label="Seed schedule", lines=1, description="Relative to start. Format: <frame or time>: <seed>, ... where frame is an integer or a time in mm:ss and seed in an integer or -1 for random")
-
+            seed_schedule = gr.Textbox(label="Seed schedule", lines=1, 
+                description="Relative to start. Format: <frame or time>: <seed>, ... where frame is an integer or a time in mm:ss and seed is an integer or -1 for random")
+            denoise_schedule = gr.Textbox(label="Denoise schedule", lines=1, 
+                description="Relative to start. Format: <frame or time>: <value>, ... where frame is an integer or a time in mm:ss and value from 0 to 1")
         with gr.Row():
             save_video = gr.Checkbox(label='Save results as video', value=True)
             output_crf = gr.Slider(
@@ -186,6 +228,7 @@ class Script(scripts.Script):
             start,
             end,
             seed_schedule,
+            denoise_schedule,
             save_video,
             output_crf,
             output_fps,
@@ -201,15 +244,14 @@ class Script(scripts.Script):
         start,
         end,
         seed_schedule,
+        denoise_schedule,
         save_video,
         output_crf,
         output_fps
     ):
-        print(f"input_path: {input_path}, extract_fps: {extract_fps}, save_dir: {save_dir}")
-       
         processing.fix_seed(p)
-
         initial_seed = p.seed
+        initial_denoise = p.denoising_strength
         initial_info = None
 
         # set up paths
@@ -217,27 +259,32 @@ class Script(scripts.Script):
         if not Path.exists(input_path):
             raise RuntimeError(f"Input video does not exist: {input_path}")
         save_dir = Path(save_dir.strip())
-        run_name = sanitize_filename_part(p.prompt[:50])
-        output_dir = f"{datetime.now():%Y-%m-%d-%H-%M-%S}_{run_name}"
+        run_name = sanitize_filename_part(input_path.stem[:15] + "+" + p.prompt[:30])
+        output_dir = f"{datetime.now():%Y-%m-%d_%H-%M-%S}_{run_name}"
         output_path = Path(save_dir, output_dir)
-        Path.mkdir(output_path, parents = True, exist_ok = True)
+        frames_path = output_path / DEFAULT_FRAMES_PATH
+        result_path = output_path / DEFAULT_RESULT_PATH
+        Path.mkdir(frames_path, parents = True, exist_ok = True)
+        Path.mkdir(result_path, parents = True, exist_ok = True)
         print("Output: ", output_path)
 
         # video statistics
         video_fps = Video.fps(input_path)
         video_duration = Video.duration(input_path)
+        print(f"Video: duration: {video_duration}s  fps: {video_fps}")
 
         start_time = parse_to_seconds(start, video_fps, video_duration)
         end_time = parse_to_seconds(end, video_fps, video_duration) # will be 0 if unspecified
+        print(f"Time: {start_time}s - {end_time}s")
         output_crf = int(output_crf)
         output_fps = float(output_fps)
 
         # extract frames from input video
-        Video.to_frames(input_path.stem, input_path, output_path, extract_fps, p.width, p.height, start_time, end_time)
+        Video.to_frames(input_path.stem, input_path, frames_path, extract_fps, p.width, p.height, start_time, end_time)
 
         # count extracted images
-        frames = sorted(output_path.glob(f"{input_path.stem}*.png"))
-        
+        frames = sorted(frames_path.glob(f"{input_path.stem}*.png"))
+
         p.do_not_save_grid = True
         p.do_not_save_samples = True
         p.subseed_strength = 0
@@ -246,13 +293,19 @@ class Script(scripts.Script):
         p.n_iter = 1
 
         # seeds: a list of sorted time and seed pairs
-        seeds = []
-        if seed_schedule != "":
-            seed_schedule = parse_schedule(seed_schedule, video_fps, video_duration)
-            #print(seed_schedule)
-            seeds = seed_travel_planning(seed_schedule,len(frames), video_fps, initial_seed)
+        seed_schedule = [(t, fix_seed(s)) for t, s  in parse_schedule(seed_schedule, video_fps, video_duration, initial_seed)]
+        print("seed_schedule: ", seed_schedule)
+        seeds = seed_travel_planning(seed_schedule, len(frames), extract_fps, initial_seed)
+        print("seeds: ", seeds)
 
-        state.job_count = len(frames)
+        # denoise
+        denoise_schedule = [(t, float(s)) for t, s  in parse_schedule(denoise_schedule, video_fps, video_duration, initial_denoise)]
+        print(denoise_schedule)
+        denoise = denoise_travel_planning(denoise_schedule, len(frames), extract_fps, initial_denoise)
+        print(denoise)
+
+        if len(frames) != len(seeds) or len(seeds) != len(denoise):
+            raise RuntimeError(f"Frame count ({len(frames)}) doesn't match seed ({len(seeds)}) or denoise ({len(denoise)}) count")
 
         # TODO: handle batch size > 1
         p.batch_size = 1
@@ -260,27 +313,30 @@ class Script(scripts.Script):
         # p.init_images = batch
         # batch = []
 
+        state.job_count = len(frames)
         for i in range(len(frames)):
             if state.interrupted:
                 break
             frame = i + 1
             state.job = f"Frame {frame}/{len(frames)}"
             p.seed, p.subseed, p.subseed_strength = seeds[i]
+            p.denoising_strength = denoise[i]
             p.init_images = [Image.open(frames[i])]
+            print(f"{frames[i]}: Seed: {p.seed} subseed: {p.subseed} str: {p.subseed_strength:0.2f}, denoise: {p.denoising_strength:0.2f}")
             proc = process_images(p)
             if initial_info is None:
                 initial_info = proc.info
 
             for output in proc.images:
-                output.save(output_path / f"{run_name}_{i:05}.png")
-                print("Saved: ", str(output_path / f"{run_name}_{i:05}.png"))
+                output.save(result_path / f"{run_name}_{i:05}.png")
+                print("Saved: ", str(result_path / f"{run_name}_{i:05}.png"))
 
         if save_video:
-            Video.from_frames(run_name, output_path, output_path, output_fps, p.width, p.height, output_crf)
+            Video.from_frames(run_name, output_path, result_path, output_fps, p.width, p.height, output_crf)
 
         if not keep:
             # delete images
-            for f in output_path.glob(f"{run_name}*.png"):
+            for f in result_path.glob(f"{run_name}*.png"):
                 f.unlink()
 
         return Processed(p, [], p.seed, initial_info)
