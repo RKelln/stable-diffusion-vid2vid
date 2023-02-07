@@ -256,18 +256,42 @@ class Script(scripts.Script):
         result_path = output_path / DEFAULT_RESULT_PATH
         Path.mkdir(frames_path, parents = True, exist_ok = True)
         Path.mkdir(result_path, parents = True, exist_ok = True)
-        print("Output: ", output_path)
 
         # video statistics
         video_fps = Video.fps(input_path)
         video_duration = Video.duration(input_path)
-        print(f"Video: duration: {video_duration}s  fps: {video_fps}")
 
         start_time = parse_to_seconds(start, video_fps, video_duration)
         end_time = parse_to_seconds(end, video_fps, video_duration) # will be 0 if unspecified
-        print(f"Time: {start_time}s - {end_time}s")
         output_crf = int(output_crf)
         output_fps = float(output_fps)
+
+        # save settings
+        settings = f"""
+{input_path}
+{output_path}
+Video:
+Length: {video_duration}
+FPS: {video_fps}
+Start: {start_time} sec
+End: {end_time} sec
+Settings:
+Seed schedule: {seed_schedule}
+Denoise schedule: {denoise_schedule}
+Output CRF: {output_crf}
+Output FPS: {output_fps}
+Diffusion values:
+Sampler: {p.sampler_name}
+Steps: {p.steps}
+Width: {p.width}
+Height: {p.height}
+Prompt:
+{p.prompt}
+Neg:
+{p.negative_prompt}
+"""
+        with open(output_path / "settings.txt", "w") as text_file:
+                text_file.write(settings)
 
         # extract frames from input video
         Video.to_frames(input_path.stem, input_path, frames_path, extract_fps, p.width, p.height, start_time, end_time)
@@ -284,15 +308,15 @@ class Script(scripts.Script):
 
         # seeds: a list of sorted time and seed pairs
         seed_schedule = [(t, fix_seed(s)) for t, s  in parse_schedule(seed_schedule, video_fps, video_duration, initial_seed)]
-        print("seed_schedule: ", seed_schedule)
+        #print("seed_schedule: ", seed_schedule)
         seeds = seed_travel_planning(seed_schedule, len(frames), extract_fps, initial_seed)
-        print("seeds: ", seeds)
+        #print("seeds: ", seeds)
 
         # denoise
         denoise_schedule = [(t, float(s)) for t, s  in parse_schedule(denoise_schedule, video_fps, video_duration, initial_denoise)]
-        print(denoise_schedule)
+        #print(denoise_schedule)
         denoise = denoise_travel_planning(denoise_schedule, len(frames), extract_fps, initial_denoise)
-        print(denoise)
+        #print(denoise)
 
         if len(frames) != len(seeds) or len(seeds) != len(denoise):
             raise RuntimeError(f"Frame count ({len(frames)}) doesn't match seed ({len(seeds)}) or denoise ({len(denoise)}) count")
@@ -312,14 +336,14 @@ class Script(scripts.Script):
             p.seed, p.subseed, p.subseed_strength = seeds[i]
             p.denoising_strength = denoise[i]
             p.init_images = [Image.open(frames[i])]
-            print(f"{frames[i]}: Seed: {p.seed} subseed: {p.subseed} str: {p.subseed_strength:0.2f}, denoise: {p.denoising_strength:0.2f}")
+            #print(f"{frames[i]}: Seed: {p.seed} subseed: {p.subseed} str: {p.subseed_strength:0.2f}, denoise: {p.denoising_strength:0.2f}")
             proc = process_images(p)
             if initial_info is None:
                 initial_info = proc.info
 
             for output in proc.images:
                 output.save(result_path / f"{run_name}_{i:05}.png")
-                print("Saved: ", str(result_path / f"{run_name}_{i:05}.png"))
+                #print("Saved: ", str(result_path / f"{run_name}_{i:05}.png"))
 
         if save_video:
             Video.from_frames(run_name, output_path, result_path, output_fps, p.width, p.height, output_crf)
