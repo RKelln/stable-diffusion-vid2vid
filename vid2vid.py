@@ -11,12 +11,9 @@
 # - https://github.com/yownas/seed_travel
 
 
-import os
-import random
-import sys
+import subprocess
 from datetime import datetime
 from pathlib import Path
-import subprocess
 from typing import Any, Callable
 
 import gradio as gr
@@ -24,7 +21,7 @@ import modules.scripts as scripts
 import numpy as np
 from modules import processing
 from modules.images import sanitize_filename_part
-from modules.processing import Processed, process_images, get_fixed_seed
+from modules.processing import Processed, get_fixed_seed, process_images
 from modules.shared import state
 from PIL import Image
 
