@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import gradio as gr
+import modules.images as images
 import modules.scripts as scripts
 import numpy as np
 from modules import processing
@@ -339,8 +340,11 @@ Neg:
                 initial_info = proc.info
 
             for output in proc.images:
-                output.save(result_path / f"{run_name}_{i:05}.png")
-                #print("Saved: ", str(result_path / f"{run_name}_{i:05}.png"))
+                # save_image(image, path, basename, seed=None, prompt=None, extension='png', info=None, short_filename=False, no_prompt=False, grid=False, pnginfo_section_name='parameters', p=None, existing_info=None, forced_filename=None, suffix="", save_to_dirs=None):
+                filename = f"{run_name}_{i:05}"
+                images.save_image(output, result_path, "", info=proc.info, forced_filename=filename)
+                #output.save(result_path / f"{filename}.png")
+                #print("Saved: ", str(result_path / f"{filename}.png"))
 
         if save_video:
             Video.from_frames(run_name, output_path, result_path, output_fps, p.width, p.height, output_crf)
