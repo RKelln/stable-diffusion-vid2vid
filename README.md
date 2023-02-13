@@ -4,7 +4,11 @@
 Video-2-video plugin that includes support for seed and denoise value travel.
 
 Intended for use with https://github.com/AUTOMATIC1111/stable-diffusion-webui.
-Save this in script folder then restart the UI.
+Save all files into `scripts` folder then restart the UI. (I.E. copy the `vid2vid_helpers` folder into `scripts` as well.)
+
+Requires `ffmpeg` to be installed.
+
+_**Please note**: this is a early version, with minimal testing, only tested with Linux. Expect bugs!_
 
 ## Credits
 Filarius, orcist1, Leonm99, yownas
@@ -16,7 +20,15 @@ Filarius, orcist1, Leonm99, yownas
 
 # Install
 
-Save this in script folder then restart the UI.
+Install [ffmpeg](https://ffmpeg.org/) if it is not already installed.
+
+Copy `vid2vid_script.py` and the `vid2vid_helpers` folder into the `scripts` folder.
+
+    scripts/
+        vid2vid_script.py
+        vid2vid_helpers/
+            vid2vid_schedules.py
+            vid2vid_video.py
 
 
 # Usage

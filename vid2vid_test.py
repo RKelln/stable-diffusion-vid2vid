@@ -2,7 +2,7 @@
 import unittest
 from typing import Any
 
-from vid2vid_schedules import *
+from vid2vid_helpers.vid2vid_schedules import *
 
 
 def fix_seed(seed : Any) -> int:
@@ -84,11 +84,12 @@ class TestParseToSeconds(unittest.TestCase):
         self.assertEqual(parse_to_seconds("13", 1.0, 10.0), 10.0) # frames @ 1 fps
 
     def test_frames(self):
+        # Frames count from 1, thus frame 0 is not valid, treated as frame 1
         self.assertAlmostEqual(parse_to_seconds("0", 30.0, 1.0), 0.0, places=3)
-        self.assertAlmostEqual(parse_to_seconds(" 1 ", 30.0, 1.0), 0.033, places=3)
-        self.assertAlmostEqual(parse_to_seconds("1", 30.0, 10.0), 0.033, places=3)
-        self.assertAlmostEqual(parse_to_seconds("10", 30.0, 10.0), 0.333, places=3)
-        self.assertAlmostEqual(parse_to_seconds("5", 10.0, 10.0), 0.5, places=3)
+        self.assertAlmostEqual(parse_to_seconds(" 1 ", 30.0, 1.0), 0.0, places=3)
+        self.assertAlmostEqual(parse_to_seconds("1", 30.0, 10.0), 0.0, places=3)
+        self.assertAlmostEqual(parse_to_seconds("10", 30.0, 10.0), 0.3, places=3)
+        self.assertAlmostEqual(parse_to_seconds("5", 10.0, 10.0), 0.4, places=3)
         self.assertAlmostEqual(parse_to_seconds("999999", 10.0, 1.0), 1.0, places=3)
 
     def test_percent(self):
@@ -210,35 +211,5 @@ def assertListAlmostEqual(self, first, second, places=None, context=None):
 
 
 if '__main__' == __name__:
-    #unittest.main()
-
-    fps = 30.0
-    extract_fps = 5
-    frame_count = 17
-    duration = float(frame_count) / fps
-    seed_schedule = ""
-    seeds = [(t, fix_seed(s)) for t, s  in parse_schedule(seed_schedule, fps, duration, -1)]
-    print("Seeds:", seeds == [(0,-1)])
-    print(seeds)
-
-    seed_travel = seed_travel_planning(seeds, frame_count, extract_fps, -1)
-    print(seed_travel)
-    
-
-    seed_schedule = "0:1, 40%:2, 15:4"
-    seeds = [(t, fix_seed(s)) for t, s  in parse_schedule(seed_schedule, fps, duration, -1)]
-    print("Seeds:")
-    print(seeds)
-    seed_travel = seed_travel_planning(seeds, frame_count, extract_fps, 0)
-    print(seed_travel)
-
-    print("Denoise:")
-    denoise_schedule = "3:0.1, 40%:0.2, 15:0.9"
-    denoise = [(t, float(v)) for t, v in parse_schedule(denoise_schedule, fps, duration, 0.5)]
-    print(denoise)
-    noise_travel = denoise_travel_planning(denoise, frame_count, extract_fps, 0.3)
-    print(noise_travel)
-
-    print("Counts:")
-    print(frame_count, len(seed_travel), len(noise_travel))
+    unittest.main()
 

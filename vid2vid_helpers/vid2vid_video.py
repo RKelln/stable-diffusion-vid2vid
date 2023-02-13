@@ -4,7 +4,8 @@ from pathlib import Path
 
 class Video:
 
-    def duration(video_path : str) -> float:
+    @classmethod
+    def duration(cls, video_path : str) -> float:
         result = subprocess.run(
             [
                 "ffprobe",
@@ -23,7 +24,9 @@ class Video:
         duration = float(result.stdout.decode('utf-8'))
         return duration
 
-    def fps(video_path : str) -> float:
+
+    @classmethod
+    def fps(cls, video_path : str) -> float:
         result = subprocess.run(
             [
                 "ffprobe",
@@ -44,10 +47,27 @@ class Video:
         return fps
 
 
-    @staticmethod
-    def to_frames(filename : str, video_path : str, output_path : str, fps : int, width : int, height : int, start_time : float = 0, end_time : float = 0):
+    @classmethod
+    def handle_subprocess_result(cls, result):
+        if result.returncode != 0:
+            msgs = []
+            if result.stdout is not None:
+                msgs.append(result.stdout.decode('utf-8'))
+            if result.stderr is not None:
+                msgs.append(result.stderr.decode('utf-8'))
+            msg = " ".join(msgs)
+            print(msg)
+            raise RuntimeError(msg)
+
+
+    @classmethod
+    def to_frames(cls, filename : str, video_path : str, output_path : str, fps : int, width : int, height : int, start_time : float = 0, end_time : float = 0, crop : bool = False):
 
         image_path = Path(output_path, f"{filename}_%05d.png")
+
+        scale_params = ['-s:v', f"{width}x{height}"]
+        if crop:
+            scale_params = ['-vf', f"crop=in_h*{width}/{height}:in_h,scale=-2:{height}"]
 
         cmd = [
             'ffmpeg',
@@ -58,29 +78,24 @@ class Video:
             cmd += ['-ss', str(start_time)]
         if end_time > 0:
             cmd += ['-to', str(end_time)]
+        cmd += ['-i', str(video_path)]
+        cmd += scale_params
         cmd += [
-            '-i', str(video_path),
-            '-s:v', f"{width}x{height}",
             '-r', str(fps),
             '-vsync', '1',
             str(image_path)
         ]
-        #print(" ".join(cmd))
+        print(" ".join(cmd))
 
         result = subprocess.run(cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )
-        # if result.stdout is not None:
-        #     print('stdout: ', result.stdout.decode('utf-8'))
-        # if result.stderr is not None:
-        #     print('stderr: ', result.stderr.decode('utf-8'))
-        if result.returncode != 0:
-            print(result.stderr.decode('utf-8'))
-            raise RuntimeError(result.stderr.decode('utf-8'))
+        cls.handle_subprocess_result(result)
 
-    @staticmethod
-    def from_frames(filename : str, output_path : str, input_path : str, fps : float, width : int, height: int, crf : int = 24) -> str:
+
+    @classmethod
+    def from_frames(cls, filename : str, output_path : str, input_path : str, fps : float, width : int, height: int, crf : int = 24) -> str:
         
         image_path = Path(input_path, f"{str(filename)}_%05d.png")
         video_path = Path(output_path, f"{str(filename)}.mp4")
@@ -104,12 +119,6 @@ class Video:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )
-        # if result.stdout is not None:
-        #     print('stdout: ', result.stdout.decode('utf-8'))
-        # if result.stderr is not None:
-        #     print('stderr: ', result.stderr.decode('utf-8'))
-        if result.returncode != 0:
-            print(result.stderr.decode('utf-8'))
-            raise RuntimeError(result.stderr.decode('utf-8'))
+        cls.handle_subprocess_result(result)
 
         return video_path

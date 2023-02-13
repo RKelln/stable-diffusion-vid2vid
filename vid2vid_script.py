@@ -27,7 +27,6 @@ from PIL import Image
 # handle local imports
 import sys, os
 scripts_path = str(Path(os.getcwd(), 'scripts'))
-print(os.getcwd(), sys.path)
 if not scripts_path in sys.path:
     sys.path.append(scripts_path)
 from vid2vid_helpers.vid2vid_schedules import *
@@ -62,6 +61,7 @@ class Script(scripts.Script):
                 step=1,
                 value=15,
             )
+            crop = gr.Checkbox(label="crop (then scale size)", value=False)
             start = gr.Textbox(label="Start time", value="00:00:00", lines=1, description="Time (hh:mm:ss.ms) or seconds (float) or frame (integer), defaults to start")
             end = gr.Textbox(label="End time", value="00:00:00", lines=1, description="Time (hh:mm:ss.ms) or seconds (float) or frame (integer), defaults to end")
 
@@ -94,6 +94,7 @@ class Script(scripts.Script):
         return [
             input_path,
             extract_fps,
+            crop,
             save_dir,
             keep,
             start,
@@ -110,6 +111,7 @@ class Script(scripts.Script):
         p,
         input_path,
         extract_fps,
+        crop,
         save_dir,
         keep,
         start,
@@ -156,6 +158,7 @@ Length: {video_duration}
 FPS: {video_fps}
 Start: {start_time} sec
 End: {end_time} sec
+Crop: {crop}
 Settings:
 Seed schedule: {seed_schedule}
 Denoise schedule: {denoise_schedule}
@@ -175,7 +178,7 @@ Neg:
                 text_file.write(settings)
 
         # extract frames from input video
-        Video.to_frames(input_path.stem, input_path, frames_path, extract_fps, p.width, p.height, start_time, end_time)
+        Video.to_frames(input_path.stem, input_path, frames_path, extract_fps, p.width, p.height, start_time, end_time, crop)
 
         # count extracted images
         frames = sorted(frames_path.glob(f"{input_path.stem}*.png"))
